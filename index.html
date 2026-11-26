@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="it"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>UNMARK · Probe Fase 0</title>
+<style>
+body{margin:0;background:#0b0b0f;color:#e8e8ee;font:15px -apple-system,system-ui,sans-serif;padding:calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px)}
+h1{font-size:20px;background:linear-gradient(90deg,#4f8cff,#9b5cff);-webkit-background-clip:text;color:transparent}
+.r{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid #222}
+.ok{color:#4ade80}.no{color:#f87171}.w{color:#fbbf24}
+button{background:linear-gradient(90deg,#4f8cff,#9b5cff);color:#fff;border:0;border-radius:12px;padding:14px;width:100%;font-size:16px;margin-top:12px}
+pre{white-space:pre-wrap;font-size:12px;color:#aaa}
+</style></head><body>
+<h1>UNMARK · Probe compatibilità</h1>
+<div id="out">Esecuzione dei test…</div>
+<button id="share">Esporta report (.txt)</button>
+<pre id="raw"></pre>
+<script>
+const R=[];const add=(k,v,note='')=>R.push([k,v,note]);
+async function t(name,fn){try{const v=await fn();add(name,v===true?'OK':v===false?'NO':String(v))}catch(e){add(name,'ERR',e.message)}}
+async function vcfg(codec,w,h,enc){const C=enc?window.VideoEncoder:window.VideoDecoder;if(!C)return false;
+ const cfg=enc?{codec,width:w,height:h,bitrate:8e6,framerate:30}:{codec,codedWidth:w,codedHeight:h};
+ const s=await C.isConfigSupported(cfg);return s.supported}
+(async()=>{
+add('User agent',navigator.userAgent);
+add('Standalone (installata)',(matchMedia('(display-mode: standalone)').matches||navigator.standalone)?'OK':'NO');
+add('Core logici',navigator.hardwareConcurrency||'?');
+add('Memoria dichiarata (GB)',navigator.deviceMemory||'non esposta');
+await t('Service Worker',()=>'serviceWorker' in navigator);
+await t('Cross-origin isolated',()=>self.crossOriginIsolated===true);
+await t('SharedArrayBuffer',()=>typeof SharedArrayBuffer!=='undefined');
+await t('WebAssembly',()=>typeof WebAssembly==='object');
+await t('WASM SIMD',()=>WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])));
+await t('VideoDecoder',()=>'VideoDecoder' in window);
+await t('VideoEncoder',()=>'VideoEncoder' in window);
+await t('AudioDecoder',()=>'AudioDecoder' in window);
+await t('AudioEncoder',()=>'AudioEncoder' in window);
+for(const [n,c] of [['H.264','avc1.640028'],['HEVC','hvc1.1.6.L120.90']]){
+ for(const [w,h,l] of [[1280,720,'720p'],[1920,1080,'1080p'],[3840,2160,'4K']]){
+  await t(`Decode ${n} ${l}`,()=>vcfg(c,w,h,false));
+  await t(`Encode ${n} ${l}`,()=>vcfg(c==='avc1.640028'&&l==='4K'?'avc1.640033':c,w,h,true));
+ }}
+await t('AAC encode',async()=>window.AudioEncoder?(await AudioEncoder.isConfigSupported({codec:'mp4a.40.2',sampleRate:48000,numberOfChannels:2,bitrate:128000})).supported:false);
+await t('MediaRecorder MP4',()=>!!window.MediaRecorder&&MediaRecorder.isTypeSupported('video/mp4'));
+await t('OffscreenCanvas',()=>typeof OffscreenCanvas!=='undefined');
+await t('WebGL2',()=>!!document.createElement('canvas').getContext('webgl2'));
+await t('WebGL2 in OffscreenCanvas',()=>typeof OffscreenCanvas!=='undefined'&&!!new OffscreenCanvas(1,1).getContext('webgl2'));
+await t('WebGPU adapter',async()=>navigator.gpu?!!(await navigator.gpu.requestAdapter()):false);
+await t('OPFS',async()=>!!(navigator.storage&&navigator.storage.getDirectory&&await navigator.storage.getDirectory()));
+await t('OPFS sync handle (worker)',()=>new Promise(res=>{
+ const src=`onmessage=async()=>{try{const d=await navigator.storage.getDirectory();const f=await d.getFileHandle('p.tmp',{create:true});const h=await f.createSyncAccessHandle();h.write(new Uint8Array(1024));h.close();await d.removeEntry('p.tmp');postMessage(true)}catch(e){postMessage('NO: '+e.message)}}`;
+ const w=new Worker(URL.createObjectURL(new Blob([src])));w.onmessage=e=>{res(e.data);w.terminate()};w.postMessage(0);setTimeout(()=>res('timeout'),5000)}));
+await t('Quota storage (MB)',async()=>{const e=await navigator.storage.estimate();return Math.round(e.quota/1048576)+' (usati '+Math.round(e.usage/1048576)+')'});
+await t('storage.persist',async()=>navigator.storage.persist?await navigator.storage.persist():false);
+await t('IndexedDB',()=>'indexedDB' in window);
+await t('Web Share file',()=>!!navigator.canShare&&navigator.canShare({files:[new File(['x'],'t.txt',{type:'text/plain'})]}));
+await t('Wake Lock',()=>'wakeLock' in navigator);
+await t('Benchmark JS (Mops/s)',()=>{const a=new Float32Array(4e6);const t0=performance.now();for(let k=0;k<5;k++)for(let i=0;i<a.length;i++)a[i]=a[i]*0.5+i;return Math.round(2e7/(performance.now()-t0)/1000)});
+const cls=v=>v==='OK'||v===true?'ok':v==='NO'||v==='ERR'||String(v).startsWith('NO')?'no':'w';
+document.getElementById('out').innerHTML=R.map(([k,v,n])=>`<div class="r"><span>${k}</span><b class="${cls(v)}">${v}${n?' · '+n:''}</b></div>`).join('');
+document.getElementById('raw').textContent=report();
+})();
+function report(){return 'UNMARK probe '+new Date().toISOString()+'\n'+R.map(([k,v,n])=>`${k}: ${v}${n?' ('+n+')':''}`).join('\n')}
+document.getElementById('share').onclick=async()=>{const f=new File([report()],'unmark-probe.txt',{type:'text/plain'});
+ if(navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({files:[f]}).catch(()=>{});
+ else{const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=f.name;a.click()}};
+</script></body></html>
